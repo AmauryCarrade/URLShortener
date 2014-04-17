@@ -41,7 +41,6 @@
 	// True if some light statistics must be displayed (only number of access).
 	// Statistics are displayed in the list of the links (if any), and at the URL
 	// http://linkToShortener.com/<linkId>+ .
-	// TODO Restriction unimplemented.
 	$config['stats'] = true;
 	
 
