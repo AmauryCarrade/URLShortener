@@ -25,6 +25,15 @@ Put the `index.php` file in a directory on your webserver. That's all.
 
 If you want to enable URL rewriting, use the `.htaccess` file provided, or equivalent rewrite rules for another web server than Apache.
 
+## Update
+
+The only thing you need to save before updating is the salt (or simply the config section at the top of the file).
+So, to update:
+
+1. copy the config section somewhere;
+2. replace the `index.php` file with the new one;
+3. replace the default config with the saved config.
+
 
 ## Configuration
 
@@ -34,34 +43,39 @@ Open the `index.php` file and follow the instructions written at the top of the 
 <?php
 	// The title displayed in the home page of the shortener.
 	$config['title'] = 'µRL Shortener';
-
-
+	
+	
 	// IMPORTANT: Set to true if URL rewriting is enabled.
 	// This can be changed at any moment without problems.
 	// Unrewrited links always works; but obviously, rewrited links works only with URL rewriting
 	// enabled in your webserver configuration, regardless to this configuration point.
 	$config['rewriteEnabled'] = false;
 	
-
+	
 	// True if the number of links must be displayed.
 	$config['countLinks'] = true;
 	
-
+	
 	// True if a list of links must be available.
 	$config['listLinks'] = true;
 	
-
+	
 	// True if some light statistics must be displayed (only number of access).
 	// Statistics are displayed in the list of the links (if any), and at the URL
 	// http://linkToShortener.com/<linkId>+ .
 	$config['stats'] = true;
 	
-
+	
+	// True if an user can delete his own links.
+	// The deletion is allowed only if the user has created the link and if he is the only one who had created it.
+	$config['allowDeletion'] = true;
+	
+	
 	// The file where data is stored.
 	// This file must be readable and writable.
 	$config['dataFile'] = 'data/data.php';
-
-
+	
+	
 	// Put here a random value. Example: ask your cat to walk on the keyboard.
 	define('SALT', 'Change me!');
 	// Do not change this salt after the first use, because change it will remove all associations

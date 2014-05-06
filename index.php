@@ -43,6 +43,10 @@
 	// http://linkToShortener.com/<linkId>+ .
 	$config['stats'] = true;
 	
+	// True if an user can delete his own links.
+	// The deletion is allowed only if the user has created the link and if he is the only one who had created it.
+	$config['allowDeletion'] = true;
+	
 
 	// The file where data is stored.
 	// This file must be readable and writable.
@@ -57,7 +61,19 @@
 	## -----------End of configuration--------------------------------------------------------------
 
 	## Don't change anything below, except if you understand what you do!
-
+	
+	
+	# Constants for page identification
+	
+	define('PAGE_HOME', 'home');
+	define('PAGE_LIST', 'list');
+	define('PAGE_STATS', 'stats');
+	define('PAGE_DELETE', 'delete');
+	
+	# Constants for messages types
+	
+	define('MESSAGE_SUCCESS', 'success');
+	define('MESSAGE_FAIL', 'fail');
 
 
 	/**
@@ -321,6 +337,8 @@
 
 
 	## Action
+	
+	/* * * * * *   API   * * * * * */
 
 	// We want to add a new URL through the 'API'.
 	// call http://shortener/?url=<URLHere> (generate a random link), or
@@ -342,14 +360,23 @@
 			echo generateURL($shortURL);
 		}
 	}
+	
+	/* * * * * *   User   * * * * * */
+	
 	else {
+	
+		// Routing
+		
 		$query = trim($_SERVER['QUERY_STRING']);
-		$statsPage = false;
-		$listPage = false;
+		
+		$page = PAGE_HOME;
 
 		if(isset($_GET['do'])) {
 			if($_GET['do'] == 'links') {
-				$listPage = true;
+				$page = PAGE_LIST;
+			}
+			else if($_GET['do'] == 'delete') {
+				$page = PAGE_DELETE;
 			}
 		}
 
@@ -368,7 +395,7 @@
 				// Maybe stats?
 				$pureLink = str_replace('+', '', $query);
 				if(!isLinkFree($data, $pureLink) && $config['stats']) {
-					$statsPage = true;
+					$page = PAGE_STATS;
 				}
 				else {
 					header($_SERVER['SERVER_PROTOCOL'] . ' 404 Not Found');
@@ -378,9 +405,22 @@
 				}
 			}
 		}
+		
+		if($page != PAGE_STATS && 
+		   ($page != PAGE_LIST || $page == PAGE_LIST && !$config['listLinks']) && 
+		   ($page != PAGE_DELETE || $page == PAGE_DELETE && !$config['allowDeletion']) ) {
+		   
+		   // If the user attemps to access an unautorized page, we simply show the home page.
+		   
+		   $page = PAGE_HOME;
+		   
+		   }
 
 		// From this point, an UI is required.
-
+		
+		$message = NULL;
+		$messageType = NULL;
+		
 		$statsShortURL = str_replace('+', '', $query);
 
 		// Form protection
@@ -391,7 +431,6 @@
 		}
 		$_SESSION['form_protection'] = hash('sha256', mt_rand());
 
-		$message = NULL;
 		$shortURL = NULL;
 		if(isset($_POST['url'])) {
 			$url = $_POST['url'];
@@ -399,17 +438,85 @@
 
 			$shortURL = addLink($data, $url, $link);
 			if($shortURL === false) {
-				$message = 'Fatal error: URL is not valid (probably).';
+				$message = 'An error occurred. The link is probably invalid.';
+				$messageType = MESSAGE_FAIL;
 			}
 			else {
-				$message = 'OK';
+				$message  = 'Your link has been saved. The link is: <br />';
+				$message .= '<a href="' . generateURL($shortURL) . '+" class="notifLink">' . generateURL($shortURL) . '</a>';
+				$messageType = MESSAGE_SUCCESS;
+				
 				$_POST['url'] = NULL; $_POST['link'] = NULL;
 			}
 		}
+		
+		
+		if($page == PAGE_DELETE) {
+			
+			$link = $_GET['link'];
+			
+			// First: is the user allowed to delete the link?
+			
+			if(isLinkFree($data, $link)) {
+				// Probably an error. The link does not exists.
+				// We redirect the user to the home page.
+				
+				$message = 'This link does not exists.';
+				$messageType = MESSAGE_FAIL;
+				
+				$page = PAGE_LIST;
+				
+			}
+			
+			else {
+				
+				$linkData = $data[$link];
+				
+				if(!in_array(hashIP($_SERVER['REMOTE_ADDR']), $linkData['ip'])) {
+					$message = 'You\'re not allowed to delete this link: you\'re not the creator!';
+					$messageType = MESSAGE_FAIL;
+					
+					$page = PAGE_LIST;
+				}
+				else {
+					
+					if(isset($_GET['ok'])) {
+						// We first remove the IP of the user
+						unset($linkData['ip'][ array_search(hashIP($_SERVER['REMOTE_ADDR']), $linkData['ip']) ]);
+						
+						if($linkData['ip'] == array()) {
+							// The user was the only author of the link.
+							// The link can be safely deleted.
+							
+							unset($data[$link]);
+							
+							$message = 'The link “' . $link . '” was successfully deleted.';
+							$messageType = MESSAGE_SUCCESS;
+							
+							$page = PAGE_LIST;
+						}
+						
+						else {
+							// The user was not the only creator of the link.
+							
+							$data[$link] = $linkData;
+							
+							$message = 'The link “' . $link . '” was not removed; it has only been disassociated from your IP as it has also been saved by others.';
+							$messageType = MESSAGE_SUCCESS;
+							
+							$page = PAGE_LIST;
+						}
+						
+						saveData($data);
+					}
+				}
+			}
+		}
+		
 
 		$filteredLinks = NULL;
 		$ip = NULL;
-		if($listPage) {
+		if($page == PAGE_LIST) {
 			$ip = isset($_GET['all']) ? NULL : $_SERVER['REMOTE_ADDR'];
 			$filteredLinks = getLinks($data, $ip);
 
@@ -484,6 +591,25 @@
 					.notifLink {
 						font-size: 1.2em;
 					}
+					.small {
+						font-size: small;
+					}
+					.deleteLink {
+						font-size: small;
+						float: right;
+						margin-top: 2px;
+					}
+					
+					.linkPreview {
+						border: solid black 1px;
+						border-radius: 5px;
+						
+						width: 50%;
+						margin-right: auto;
+						margin-left: auto;
+						
+						font-size: small;
+					}
 
 					/* Thanks to Bootstrap. */
 					.alert {
@@ -550,52 +676,64 @@
 						</p>
 					<?php endif; ?>
 				</header>
-				<?php if(!$statsPage && (!$listPage || !$config['listLinks'])): ?>
-					<?php if($message != NULL): ?>
-						<?php if($message == 'OK'): ?>
-							<div class="alert alert-success">
-								Your link has been saved. The link is: <br />
-								<a href="<?php echo generateURL($shortURL); ?>+" class="notifLink"><?php echo generateURL($shortURL); ?></a>
-							</div>
-						<?php else: ?>
-							<div class="alert alert-error">
-								An error occurred. The link is probably empty.
-							</div>
-						<?php endif; ?>
+				
+				
+				<?php /* Message */ ?>
+				
+				<?php if($message != NULL): ?>
+					<?php if($messageType == MESSAGE_SUCCESS): ?>
+						<div class="alert alert-success">
+							<?php echo $message; ?>
+						</div>
+					<?php else: ?>
+						<div class="alert alert-error">
+							<?php echo $message; ?>
+						</div>
 					<?php endif; ?>
-				<form method="post">
-					<h3>Want to generate a link?</h3>
-					<input type="hidden" name="form_protection" value="<?php echo $_SESSION['form_protection']; ?>" />
-					<input type="url" name="url" placeholder="Enter the long URL here..." value="<?php isset($_POST['url']) ? $_POST['url'] : NULL; ?>" required /><br />
-					<input type="text" name="link" placeholder="Enter a prefered short URL here (optionnal)" value="<?php isset($_POST['link']) ? $_POST['link'] : NULL; ?>" /><br />
-					<input type="submit" value="Generate the link" />
-				</form>
+				<?php endif; ?>
+				
+				
+				<?php if($page == PAGE_HOME): ?>
+					<form method="post">
+						<h3>Want to generate a link?</h3>
+						<input type="hidden" name="form_protection" value="<?php echo $_SESSION['form_protection']; ?>" />
+						<input type="url" name="url" placeholder="Enter the long URL here..." value="<?php isset($_POST['url']) ? $_POST['url'] : NULL; ?>" required /><br />
+						<input type="text" name="link" placeholder="Enter a prefered short URL here (optionnal)" value="<?php isset($_POST['link']) ? $_POST['link'] : NULL; ?>" /><br />
+						<input type="submit" value="Generate the link" />
+					</form>
 
-				<h3>Do you want some stats?</h3>
-				<p>
-					Just add a “+” after the short URL.<br />
-					<small>Example: <?php echo generateURL('abcdef'); ?> → <?php echo generateURL('abcdef'); ?>+</small>
-				</p>
+					<h3>Do you want some stats?</h3>
+					<p>
+						Just add a “+” after the short URL.<br />
+						<small>Example: <?php echo generateURL('abcdef'); ?> → <?php echo generateURL('abcdef'); ?>+</small>
+					</p>
 
-				<h4>Maybe an API?</h4>
-				<p>
-					<small>
-						To generate a link, call <code><?php echo str_replace('?', NULL, generateURL(NULL)); ?>?url=<span class="arg">&lt;yourURL&gt;</span></code>.<br />
-						With a preferred short link, use <code><?php echo str_replace('?', NULL, generateURL(NULL)); ?>?url=<span class="arg">&lt;yourURL&gt;</span>&amp;link=<span class="arg">&lt;thePreferredShortURL&gt;</code>.<br />
-						These pages display the complete short URL in plain text as a response.
-					</small>
-				</p>
-
-				<?php elseif($statsPage): ?>
-				<p class="linkAssoc">
-					<?php echo generateURL($statsShortURL); ?><br />
-					↓<br />
-					<a href="<?php echo generateURL($statsShortURL); ?>"><?php echo $data[$statsShortURL]['url']; ?></a>
-				</p>
-				<p>
-					<?php echo number_format($data[$statsShortURL]['views'], 0, ',', '&#8239;'); ?> clic<?php if($data[$statsShortURL]['views'] != 1) { echo 's'; } ?> on this link.
-				</p>
-				<?php else: // List ?> 
+					<h4>Maybe an API?</h4>
+					<p>
+						<small>
+							To generate a link, call <code><?php echo str_replace('?', NULL, generateURL(NULL)); ?>?url=<span class="arg">&lt;yourURL&gt;</span></code>.<br />
+							With a preferred short link, use <code><?php echo str_replace('?', NULL, generateURL(NULL)); ?>?url=<span class="arg">&lt;yourURL&gt;</span>&amp;link=<span class="arg">&lt;thePreferredShortURL&gt;</code>.<br />
+							These pages display the complete short URL in plain text as a response.
+						</small>
+					</p>
+				
+				
+				<?php elseif($page == PAGE_STATS): ?>
+				
+				
+					<p class="linkAssoc">
+						<?php echo generateURL($statsShortURL); ?><br />
+						↓<br />
+						<a href="<?php echo generateURL($statsShortURL); ?>"><?php echo $data[$statsShortURL]['url']; ?></a>
+					</p>
+					<p>
+						<?php echo number_format($data[$statsShortURL]['views'], 0, ',', '&#8239;'); ?> clic<?php if($data[$statsShortURL]['views'] != 1) { echo 's'; } ?> on this link.
+					</p>
+				
+				
+				<?php elseif($page == PAGE_LIST): ?>
+				
+				
 					<h2><?php if($ip != NULL): ?>Your links<?php else: ?>All links<?php endif; ?></h2>
 					<p class="nav">
 						<a href="?do=links">Your links</a> – <a href="?do=links&amp;all">All links</a>
@@ -613,14 +751,44 @@
 							<tr>
 								<td class="table-cell-link">
 									<a href="<?php echo generateURL($linkID); ?>"><?php echo generateURL('<span class="arg">' . $linkID . '</span>'); ?></a><br />
-									&nbsp;&nbsp;&nbsp;→ <small><a href="<?php echo generateURL($linkID); ?>"><?php echo $link['url']; ?></a></small>
+									&nbsp;&nbsp;&nbsp;→ <span class="small"><a href="<?php echo generateURL($linkID); ?>"><?php echo $link['url']; ?></a></span>
 								</td>
 								<td class="table-cell-views">
 									<a href="<?php echo generateURL($linkID); ?>+"><span class="arg"><?php echo number_format($link['views'], 0, ',', '&#8239;'); ?></span>&nbsp;clic<?php if($link['views'] != 1) { echo 's'; } ?></a>
+									<?php if($ip != NULL && $config['allowDeletion']): // The delete link is only shown to the author(s) ?>
+										<div class="deleteLink"><a href="?do=delete&amp;link=<?php echo $linkID; ?>">× Delete</a></div>
+									<?php endif; ?>
 								</td>
 							</tr>
 							<?php endforeach; ?>
 						</tbody>
+						
+				<?php elseif($page == PAGE_DELETE): ?>
+				
+				
+					<h2>You are about to delete a link.</h2>
+					
+					<p>
+						Do you really want to delete this link?
+					</p>
+					<div class="linkPreview">
+						<p class="linkAssoc">
+							<?php echo generateURL($link); ?><br />
+							↓<br />
+							<a href="<?php echo generateURL($link); ?>"><?php echo $data[$link]['url']; ?></a>
+						</p>
+					</div>
+					<p class="linksConfirm">
+						<a href="?do=delete&amp;link=<?php echo $_GET['link']; ?>&amp;ok">Yes, I am</a>&nbsp;&nbsp;&nbsp;—&nbsp;&nbsp;&nbsp;<a href="?do=links">No, I changed my mind!</a>
+					</p>
+				
+				
+				<?php else: // Should never happens ?>
+				
+					<p>
+						What? A page, here? Probably an error.
+					</p>
+				
 				<?php endif; ?>
 			</body>
 		</html>
