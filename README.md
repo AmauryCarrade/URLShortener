@@ -6,6 +6,8 @@ Links generated are 6-chars links (chars allowed are [a-z A-Z 0-9], except if pe
 
 Please note: *this is a work in progress*.
 
+License: [CeCILL v2](http://www.cecill.info/licences/Licence_CeCILL_V2-fr.htm).
+
 ## Features
 
 - Lightweight (one file of 18 KiB, and the database is compressed and weighs about 6 KiB per hundred links).
